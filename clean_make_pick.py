@@ -5,14 +5,19 @@ import pandas as pd
 
 def clean_api(api_response=None, points_minimum=60, best_per_pos=None, prefill_players=None, with_status=True, cut_exxy=True):
     """
-    Process player data from Vaastav's CSV data instead of the FPL API
+    Process player data using current API data with historical points
     """
-    # Load Vaastav's CSV data for players and teams
-    players_df = pd.read_csv('https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2024-25/players_raw.csv')
-    teams_df = pd.read_csv('https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2024-25/teams.csv')
+    # Load Vaastav's historical CSV data for players and teams (for PPG and total points)
+    historical_players_df = pd.read_csv('https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2024-25/players_raw.csv')
     
-    # Create a team ID to short name mapping
-    team_id_to_short = dict(zip(teams_df['id'], teams_df['short_name']))
+    # Create a dictionary of historical player data by ID
+    historical_data = {}
+    for _, player in historical_players_df.iterrows():
+        player_id = str(player['id'])
+        historical_data[player_id] = {
+            'total_points': player['total_points'],
+            'points_per_game': player['points_per_game']
+        }
     
     # Position mapping based on element_type
     position_map = {
@@ -25,30 +30,44 @@ def clean_api(api_response=None, points_minimum=60, best_per_pos=None, prefill_p
     best_by_pos = {"GKP":[],"DEF":[],"MID":[],"FWD":[]}
     prefill_players_info = []
 
-    # Process each player from the DataFrame
-    for _, player in players_df.iterrows():
+    # Process each player from the current API data
+    for player in api_response['elements']:
         
         id = str(player['id'])
         name = player['web_name']
         
-        # Get team short name using team ID
+        # Get team short name 
         team_id = player['team']
-        EPL_team = team_id_to_short.get(team_id, f"Team{team_id}")
+        EPL_team = api_response['teams'][team_id-1]['short_name']
         
-        # Convert element_type to position string
+        # Get position
         element_type = player['element_type']
-        if isinstance(element_type, str):
-            pos = element_type
-        else:
-            pos = position_map.get(element_type, 'UNK')
+        pos = position_map.get(element_type, 'UNK')
             
         # Skip players with unknown positions
         if pos == 'UNK' or pos not in best_by_pos:
             continue
             
-        cost = round(player['now_cost']/10, 1)  # Scale from raw value to millions
-        total_points = player['total_points']
-        pts_per_game = float(player['points_per_game'])
+        # Get current cost
+        cost = round(player['now_cost']/10, 1)
+        
+        # Get historical points data for filtering, but use current PPG
+        current_ppg = float(player['points_per_game'])
+        
+        if id in historical_data:
+            # Use historical total points for filtering
+            total_points = historical_data[id]['total_points']
+            # Historical PPG - but only if current PPG is 0 (player hasn't played yet)
+            if current_ppg == 0.0:
+                historical_ppg = float(historical_data[id]['points_per_game'])
+                pts_per_game = historical_ppg
+            else:
+                # Otherwise use current season's PPG
+                pts_per_game = current_ppg
+        else:
+            # Fallback to current data if historical not available
+            total_points = player['total_points']
+            pts_per_game = current_ppg
 
         # Check if player is in prefill list
         if prefill_players and name in prefill_players:
@@ -60,8 +79,7 @@ def clean_api(api_response=None, points_minimum=60, best_per_pos=None, prefill_p
             continue
         
         if with_status:
-            status = player['status']
-            if status != 'a':  # Only include available players
+            if player['chance_of_playing_next_round'] not in (None, 100):  # Only include available players
                 continue
 
         if pos == "MNG":
@@ -140,14 +158,28 @@ def start_team_pre_picked(pre_picked):
 
 def clean_data_oop(file_name=None, points_limit=60, pts_per_limit=0, with_status=True, cut_exxy=True):
     """
-    Updated to use Vaastav's CSV data instead of a local file
+    Updated to use Vaastav's historical data with current API data
     """
-    # Load Vaastav's CSV data for players and teams
-    players_df = pd.read_csv('https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2024-25/players_raw.csv')
-    teams_df = pd.read_csv('https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2024-25/teams.csv')
+    # Fetch current FPL bootstrap data
+    import requests
+    response = requests.get(
+        "https://fantasy.premierleague.com/api/bootstrap-static/",
+        timeout=(2, 5),  # 2 s connect, 5 s read
+    )
+    response.raise_for_status()
+    current_data = response.json()
     
-    # Create a team ID to short name mapping
-    team_id_to_short = dict(zip(teams_df['id'], teams_df['short_name']))
+    # Load historical data for points
+    historical_players_df = pd.read_csv('https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2024-25/players_raw.csv')
+    
+    # Create a dictionary of historical player data by ID
+    historical_data = {}
+    for _, player in historical_players_df.iterrows():
+        player_id = str(player['id'])
+        historical_data[player_id] = {
+            'total_points': player['total_points'],
+            'points_per_game': player['points_per_game']
+        }
     
     # Position mapping based on element_type
     position_map = {
@@ -159,37 +191,51 @@ def clean_data_oop(file_name=None, points_limit=60, pts_per_limit=0, with_status
     
     players_clean_list = []
 
-    # Process each player from the DataFrame
-    for _, player in players_df.iterrows():
+    # Process each player from current API data
+    for player in current_data['elements']:
         
         id = str(player['id'])
         name = player['web_name']
         
-        # Get team short name using team ID
+        # Get team short name
         team_id = player['team']
-        EPL_team = team_id_to_short.get(team_id, f"Team{team_id}")
+        EPL_team = current_data['teams'][team_id-1]['short_name']
         
-        # Convert element_type to position string
+        # Get position
         element_type = player['element_type']
-        if isinstance(element_type, str):
-            pos = element_type
-        else:
-            pos = position_map.get(element_type, 'UNK')
-            
+        pos = position_map.get(element_type, 'UNK')
+        
         # Skip players with unknown positions
         if pos == 'UNK' or pos not in ['GKP', 'DEF', 'MID', 'FWD']:
             continue
             
-        cost = round(player['now_cost']/10, 1)  # Scale from raw value to millions
-        total_points = player['total_points']
-        pts_per_game = float(player['points_per_game'])
+        # Get current cost
+        cost = round(player['now_cost']/10, 1)
+        
+        # Get current PPG and historical points for filtering
+        current_ppg = float(player['points_per_game'])
+        
+        if id in historical_data:
+            # Use historical total points for filtering
+            total_points = historical_data[id]['total_points']
+            # Historical PPG - but only if current PPG is 0 (player hasn't played yet)
+            if current_ppg == 0.0:
+                historical_ppg = float(historical_data[id]['points_per_game'])
+                pts_per_game = historical_ppg
+            else:
+                # Otherwise use current season's PPG
+                pts_per_game = current_ppg
+        else:
+            # Fallback to current data if historical not available
+            total_points = player['total_points']
+            pts_per_game = current_ppg
 
         # Apply filters
         if total_points < points_limit or pts_per_game < pts_per_limit:
             continue
         
         if with_status:
-            if player['status'] != 'a':  # Only include available players
+            if player['chance_of_playing_next_round'] not in (None, 100):
                 continue
 
         players_clean_list.append(Player(id, name, EPL_team, pos, cost, pts_per_game, total_points))
@@ -222,14 +268,28 @@ def clean_data_oop(file_name=None, points_limit=60, pts_per_limit=0, with_status
 
 def clean_data_oop_best(file_name=None, points_limit=60, best_per_pos=None, with_status=True, cut_exxy=True):
     """
-    Updated to use Vaastav's CSV data instead of a local file
+    Updated to use Vaastav's historical data with current API data
     """
-    # Load Vaastav's CSV data for players and teams
-    players_df = pd.read_csv('https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2024-25/players_raw.csv')
-    teams_df = pd.read_csv('https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2024-25/teams.csv')
+    # Fetch current FPL bootstrap data
+    import requests
+    response = requests.get(
+        "https://fantasy.premierleague.com/api/bootstrap-static/",
+        timeout=(2, 5),  # 2 s connect, 5 s read
+    )
+    response.raise_for_status()
+    current_data = response.json()
     
-    # Create a team ID to short name mapping
-    team_id_to_short = dict(zip(teams_df['id'], teams_df['short_name']))
+    # Load historical data for points
+    historical_players_df = pd.read_csv('https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2024-25/players_raw.csv')
+    
+    # Create a dictionary of historical player data by ID
+    historical_data = {}
+    for _, player in historical_players_df.iterrows():
+        player_id = str(player['id'])
+        historical_data[player_id] = {
+            'total_points': player['total_points'],
+            'points_per_game': player['points_per_game']
+        }
     
     # Position mapping based on element_type
     position_map = {
@@ -241,37 +301,51 @@ def clean_data_oop_best(file_name=None, points_limit=60, best_per_pos=None, with
     
     best_by_pos = {"GKP":[],"DEF":[],"MID":[],"FWD":[]}
 
-    # Process each player from the DataFrame
-    for _, player in players_df.iterrows():
+    # Process each player from current API data
+    for player in current_data['elements']:
         
         id = str(player['id'])
         name = player['web_name']
         
-        # Get team short name using team ID
+        # Get team short name
         team_id = player['team']
-        EPL_team = team_id_to_short.get(team_id, f"Team{team_id}")
+        EPL_team = current_data['teams'][team_id-1]['short_name']
         
-        # Convert element_type to position string
+        # Get position
         element_type = player['element_type']
-        if isinstance(element_type, str):
-            pos = element_type
-        else:
-            pos = position_map.get(element_type, 'UNK')
-            
+        pos = position_map.get(element_type, 'UNK')
+        
         # Skip players with unknown positions
         if pos == 'UNK' or pos not in best_by_pos:
             continue
             
-        cost = round(player['now_cost']/10, 1)  # Scale from raw value to millions
-        total_points = player['total_points']
-        pts_per_game = float(player['points_per_game'])
+        # Get current cost
+        cost = round(player['now_cost']/10, 1)
+        
+        # Get current PPG and historical points for filtering
+        current_ppg = float(player['points_per_game'])
+        
+        if id in historical_data:
+            # Use historical total points for filtering
+            total_points = historical_data[id]['total_points']
+            # Historical PPG - but only if current PPG is 0 (player hasn't played yet)
+            if current_ppg == 0.0:
+                historical_ppg = float(historical_data[id]['points_per_game'])
+                pts_per_game = historical_ppg
+            else:
+                # Otherwise use current season's PPG
+                pts_per_game = current_ppg
+        else:
+            # Fallback to current data if historical not available
+            total_points = player['total_points']
+            pts_per_game = current_ppg
 
         # Apply filters
         if total_points < points_limit:
             continue
         
         if with_status:
-            if player['status'] != 'a':  # Only include available players
+            if player['chance_of_playing_next_round'] not in (None, 100):
                 continue
             
         best_by_pos[pos].append(Player(id, name, EPL_team, pos, cost, pts_per_game, total_points))
@@ -321,14 +395,28 @@ def clean_data_oop_best(file_name=None, points_limit=60, best_per_pos=None, with
 
 def clean_data(file_name=None, points_limit=60, cut_exxy=True):
     """
-    Updated to use Vaastav's CSV data instead of a local file
+    Updated to use Vaastav's historical data with current API data
     """
-    # Load Vaastav's CSV data for players and teams
-    players_df = pd.read_csv('https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2024-25/players_raw.csv')
-    teams_df = pd.read_csv('https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2024-25/teams.csv')
+    # Fetch current FPL bootstrap data
+    import requests
+    response = requests.get(
+        "https://fantasy.premierleague.com/api/bootstrap-static/",
+        timeout=(2, 5),  # 2 s connect, 5 s read
+    )
+    response.raise_for_status()
+    current_data = response.json()
     
-    # Create a team ID to short name mapping
-    team_id_to_short = dict(zip(teams_df['id'], teams_df['short_name']))
+    # Load historical data for points
+    historical_players_df = pd.read_csv('https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2024-25/players_raw.csv')
+    
+    # Create a dictionary of historical player data by ID
+    historical_data = {}
+    for _, player in historical_players_df.iterrows():
+        player_id = str(player['id'])
+        historical_data[player_id] = {
+            'total_points': player['total_points'],
+            'points_per_game': player['points_per_game']
+        }
     
     # Position mapping based on element_type
     position_map = {
@@ -340,37 +428,50 @@ def clean_data(file_name=None, points_limit=60, cut_exxy=True):
     
     players_cleaned_dict = {}
 
-    # Process each player from the DataFrame
-    for _, player in players_df.iterrows():
+    # Process each player from current API data
+    for player in current_data['elements']:
         
         id = str(player['id'])
         
-        # Get team short name using team ID
+        # Get team short name
         team_id = player['team']
-        EPL_team = team_id_to_short.get(team_id, f"Team{team_id}")
+        EPL_team = current_data['teams'][team_id-1]['short_name']
         
-        # Convert element_type to position string
+        # Get position
         element_type = player['element_type']
-        if isinstance(element_type, str):
-            pos = element_type
-        else:
-            pos = position_map.get(element_type, 'UNK')
-            
+        pos = position_map.get(element_type, 'UNK')
+        
         # Skip players with unknown positions
         if pos == 'UNK' or pos not in ['GKP', 'DEF', 'MID', 'FWD']:
             continue
             
-        cost = round(player['now_cost']/10, 1)  # Scale from raw value to millions
-        total_points = player['total_points']
+        # Get current cost
+        cost = round(player['now_cost']/10, 1)
+        
+        # Get current PPG and historical points for filtering
+        current_ppg = float(player['points_per_game'])
+        
+        if id in historical_data:
+            # Use historical total points for filtering
+            total_points = historical_data[id]['total_points']
+            # Only use historical PPG if current PPG is 0
+            if current_ppg == 0.0:
+                pts_per_game = float(historical_data[id]['points_per_game'])
+            else:
+                pts_per_game = current_ppg
+        else:
+            # Fallback to current data if historical not available
+            total_points = player['total_points']
+            pts_per_game = current_ppg
 
         # Apply filters
         if total_points < points_limit:
             continue
 
-        if player['status'] != 'a':  # Only include available players
+        if player['chance_of_playing_next_round'] not in (None, 100):
             continue
 
-        players_cleaned_dict[id] = [total_points, cost, pos, EPL_team]
+        players_cleaned_dict[id] = [total_points, cost, pos, EPL_team, pts_per_game]
 
     if cut_exxy:
         pos_req = {'GKP':2,'DEF':5,'MID':5,'FWD':3}
