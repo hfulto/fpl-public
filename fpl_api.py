@@ -72,6 +72,8 @@ def run_fpl_api(
 
     # Helper: convert a Player object to dictionary
     def player_to_dict(player):
+        if player is None:
+            return None
         return {
             "name": player.name,
             "cost": player.cost,
@@ -81,7 +83,10 @@ def run_fpl_api(
 
     # Helper: convert an FPLTeam to serializable dict
     def team_to_dict(team):
-        return {pos: [player_to_dict(p) for p in players] for pos, players in team.items()}
+        if team is None:
+            return None
+        return {pos: [player_to_dict(p) for p in players if p is not None] 
+                for pos, players in team.items() if players is not None}
 
     # Build result payload
     result = {

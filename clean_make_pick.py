@@ -14,10 +14,16 @@ def clean_api(api_response=None, points_minimum=60, best_per_pos=None, prefill_p
     historical_data = {}
     for _, player in historical_players_df.iterrows():
         player_id = str(player['id'])
-        historical_data[player_id] = {
-            'total_points': player['total_points'],
-            'points_per_game': player['points_per_game']
-        }
+        try:
+            # If player has minutes, they played in Premier League
+            if player['minutes'] > 0:
+                historical_data[player_id] = {
+                    'total_points': player['total_points'],
+                    'points_per_game': player['points_per_game']
+                }
+        except (KeyError, AttributeError):
+            # Skip if data not available
+            continue
     
     # Position mapping based on element_type
     position_map = {
@@ -51,23 +57,23 @@ def clean_api(api_response=None, points_minimum=60, best_per_pos=None, prefill_p
         # Get current cost
         cost = round(player['now_cost']/10, 1)
         
-        # Get historical points data for filtering, but use current PPG
-        current_ppg = float(player['points_per_game'])
-        
-        if id in historical_data:
-            # Use historical total points for filtering
-            total_points = historical_data[id]['total_points']
-            # Historical PPG - but only if current PPG is 0 (player hasn't played yet)
-            if current_ppg == 0.0:
-                historical_ppg = float(historical_data[id]['points_per_game'])
-                pts_per_game = historical_ppg
-            else:
-                # Otherwise use current season's PPG
-                pts_per_game = current_ppg
-        else:
-            # Fallback to current data if historical not available
+        # Get current PPG and total points
+        try:
             total_points = player['total_points']
-            pts_per_game = current_ppg
+            
+            if id in historical_data:
+                # Player was in Premier League last season - use historical PPG
+                historical_points = historical_data[id]['total_points']
+                # Use historical points for filtering
+                total_points = max(total_points, historical_points)
+                # Always use historical PPG for players who were in PL last season
+                pts_per_game = float(historical_data[id]['points_per_game'])
+            else:
+                # Player wasn't in Premier League last season - use 0 PPG
+                pts_per_game = 0
+        except (ValueError, TypeError):
+            total_points = 0
+            pts_per_game = 0
 
         # Check if player is in prefill list
         if prefill_players and name in prefill_players:
@@ -212,23 +218,23 @@ def clean_data_oop(file_name=None, points_limit=60, pts_per_limit=0, with_status
         # Get current cost
         cost = round(player['now_cost']/10, 1)
         
-        # Get current PPG and historical points for filtering
-        current_ppg = float(player['points_per_game'])
-        
-        if id in historical_data:
-            # Use historical total points for filtering
-            total_points = historical_data[id]['total_points']
-            # Historical PPG - but only if current PPG is 0 (player hasn't played yet)
-            if current_ppg == 0.0:
-                historical_ppg = float(historical_data[id]['points_per_game'])
-                pts_per_game = historical_ppg
-            else:
-                # Otherwise use current season's PPG
-                pts_per_game = current_ppg
-        else:
-            # Fallback to current data if historical not available
+        # Get PPG based on PL history
+        try:
             total_points = player['total_points']
-            pts_per_game = current_ppg
+            
+            if id in historical_data:
+                # Player was in Premier League last season - use historical PPG
+                historical_points = historical_data[id]['total_points']
+                # Use historical points for filtering
+                total_points = max(total_points, historical_points)
+                # Always use historical PPG for players who were in PL last season
+                pts_per_game = float(historical_data[id]['points_per_game'])
+            else:
+                # Player wasn't in Premier League last season - use 0 PPG
+                pts_per_game = 0
+        except (ValueError, TypeError):
+            total_points = 0
+            pts_per_game = 0
 
         # Apply filters
         if total_points < points_limit or pts_per_game < pts_per_limit:
@@ -322,23 +328,23 @@ def clean_data_oop_best(file_name=None, points_limit=60, best_per_pos=None, with
         # Get current cost
         cost = round(player['now_cost']/10, 1)
         
-        # Get current PPG and historical points for filtering
-        current_ppg = float(player['points_per_game'])
-        
-        if id in historical_data:
-            # Use historical total points for filtering
-            total_points = historical_data[id]['total_points']
-            # Historical PPG - but only if current PPG is 0 (player hasn't played yet)
-            if current_ppg == 0.0:
-                historical_ppg = float(historical_data[id]['points_per_game'])
-                pts_per_game = historical_ppg
-            else:
-                # Otherwise use current season's PPG
-                pts_per_game = current_ppg
-        else:
-            # Fallback to current data if historical not available
+        # Get PPG based on PL history
+        try:
             total_points = player['total_points']
-            pts_per_game = current_ppg
+            
+            if id in historical_data:
+                # Player was in Premier League last season - use historical PPG
+                historical_points = historical_data[id]['total_points']
+                # Use historical points for filtering
+                total_points = max(total_points, historical_points)
+                # Always use historical PPG for players who were in PL last season
+                pts_per_game = float(historical_data[id]['points_per_game'])
+            else:
+                # Player wasn't in Premier League last season - use 0 PPG
+                pts_per_game = 0
+        except (ValueError, TypeError):
+            total_points = 0
+            pts_per_game = 0
 
         # Apply filters
         if total_points < points_limit:
@@ -448,21 +454,23 @@ def clean_data(file_name=None, points_limit=60, cut_exxy=True):
         # Get current cost
         cost = round(player['now_cost']/10, 1)
         
-        # Get current PPG and historical points for filtering
-        current_ppg = float(player['points_per_game'])
-        
-        if id in historical_data:
-            # Use historical total points for filtering
-            total_points = historical_data[id]['total_points']
-            # Only use historical PPG if current PPG is 0
-            if current_ppg == 0.0:
+        # Get PPG based on PL history
+        try:
+            total_points = player['total_points']
+            
+            if id in historical_data:
+                # Player was in Premier League last season - use historical PPG
+                historical_points = historical_data[id]['total_points']
+                # Use historical points for filtering
+                total_points = max(total_points, historical_points)
+                # Always use historical PPG for players who were in PL last season
                 pts_per_game = float(historical_data[id]['points_per_game'])
             else:
-                pts_per_game = current_ppg
-        else:
-            # Fallback to current data if historical not available
-            total_points = player['total_points']
-            pts_per_game = current_ppg
+                # Player wasn't in Premier League last season - use 0 PPG
+                pts_per_game = 0
+        except (ValueError, TypeError):
+            total_points = 0
+            pts_per_game = 0
 
         # Apply filters
         if total_points < points_limit:
