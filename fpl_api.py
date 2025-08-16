@@ -1,9 +1,10 @@
 from player_team import FPLTeam
 from clean_make_pick import clean_api, start_team_pre_picked
 
-import requests, sys, time, json
+import sys, time, json
 from typing import List, Optional
 import codecs
+import pandas as pd
 
 # Timeout constant (seconds)
 TIMEOUT_SECONDS = 10.0
@@ -17,15 +18,6 @@ def run_fpl_api(
     runs: int = 10000,
     points_minimum: int = 60,
 ):
-
-    # Fetch FPL bootstrap data
-    response = requests.get(
-        "https://fantasy.premierleague.com/api/bootstrap-static/",
-        timeout=(2, 5),  # 2 s connect, 5 s read
-    )
-    response.raise_for_status()
-    r = response.json()
-
     # Static configuration
     best_per_pos = [6, 15, 15, 9]
     cut_exxy = True
@@ -33,7 +25,6 @@ def run_fpl_api(
 
     # Clean and prepare players data
     players_clean_list, prefill_players_info = clean_api(
-        api_response=r,
         points_minimum=points_minimum,
         prefill_players=prefill_players,
         best_per_pos=best_per_pos,

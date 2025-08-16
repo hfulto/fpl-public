@@ -1,40 +1,73 @@
 from player_team import Player
 import csv
 import random
+import pandas as pd
 
-def clean_api(api_response, points_minimum, best_per_pos, prefill_players, with_status, cut_exxy):
-
-    r = api_response
-
+def clean_api(api_response=None, points_minimum=60, best_per_pos=None, prefill_players=None, with_status=True, cut_exxy=True):
+    """
+    Process player data from Vaastav's CSV data instead of the FPL API
+    """
+    # Load Vaastav's CSV data for players and teams
+    players_df = pd.read_csv('https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2024-25/players_raw.csv')
+    teams_df = pd.read_csv('https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2024-25/teams.csv')
+    
+    # Create a team ID to short name mapping
+    team_id_to_short = dict(zip(teams_df['id'], teams_df['short_name']))
+    
+    # Position mapping based on element_type
+    position_map = {
+        1: 'GKP',
+        2: 'DEF',
+        3: 'MID',
+        4: 'FWD'
+    }
+    
     best_by_pos = {"GKP":[],"DEF":[],"MID":[],"FWD":[]}
-
     prefill_players_info = []
 
-    for player in r['elements']:
-            
-        id = player['id']
+    # Process each player from the DataFrame
+    for _, player in players_df.iterrows():
+        
+        id = str(player['id'])
         name = player['web_name']
-        EPL_team = r['teams'][player['team']-1]['short_name']
-        pos = r['element_types'][player['element_type']-1]['plural_name_short']
-        cost = round(player['now_cost']/10,1)
+        
+        # Get team short name using team ID
+        team_id = player['team']
+        EPL_team = team_id_to_short.get(team_id, f"Team{team_id}")
+        
+        # Convert element_type to position string
+        element_type = player['element_type']
+        if isinstance(element_type, str):
+            pos = element_type
+        else:
+            pos = position_map.get(element_type, 'UNK')
+            
+        # Skip players with unknown positions
+        if pos == 'UNK' or pos not in best_by_pos:
+            continue
+            
+        cost = round(player['now_cost']/10, 1)  # Scale from raw value to millions
         total_points = player['total_points']
         pts_per_game = float(player['points_per_game'])
 
-        if name in prefill_players:
-            prefill_players_info.append(Player(id,name,EPL_team,pos,cost,pts_per_game,total_points))
+        # Check if player is in prefill list
+        if prefill_players and name in prefill_players:
+            prefill_players_info.append(Player(id, name, EPL_team, pos, cost, pts_per_game, total_points))
             continue
 
+        # Apply filters
         if total_points < points_minimum:
             continue
         
         if with_status:
-            if player['chance_of_playing_next_round'] not in (None,100):
+            status = player['status']
+            if status != 'a':  # Only include available players
                 continue
 
         if pos == "MNG":
             continue
 
-        best_by_pos[pos].append(Player(id,name,EPL_team,pos,cost,pts_per_game,total_points))
+        best_by_pos[pos].append(Player(id, name, EPL_team, pos, cost, pts_per_game, total_points))
 
     players_clean_list = []
     positions = ['GKP','DEF','MID','FWD']
@@ -105,53 +138,61 @@ def start_team_pre_picked(pre_picked):
 
 #############################################################################
 
-def clean_data_oop(file_name, points_limit, pts_per_limit, with_status, cut_exxy):
+def clean_data_oop(file_name=None, points_limit=60, pts_per_limit=0, with_status=True, cut_exxy=True):
+    """
+    Updated to use Vaastav's CSV data instead of a local file
+    """
+    # Load Vaastav's CSV data for players and teams
+    players_df = pd.read_csv('https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2024-25/players_raw.csv')
+    teams_df = pd.read_csv('https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2024-25/teams.csv')
     
-    players_list = []
-
-    with open(file_name, 'r') as file:
-        reader = csv.reader(file)
-
-        for row in reader:
-            players_list.append(row)
-
-    players_list.pop(0)
-
-    #####################################
-
-    id_to_name = []
+    # Create a team ID to short name mapping
+    team_id_to_short = dict(zip(teams_df['id'], teams_df['short_name']))
     
-    with open('player_idlist0.csv', 'r',encoding='utf-8') as file:
-        reader = csv.reader(file)
-
-        for row in reader:
-            id_to_name.append(row[1])
-
-    #######################################
-
-
+    # Position mapping based on element_type
+    position_map = {
+        1: 'GKP',
+        2: 'DEF',
+        3: 'MID',
+        4: 'FWD'
+    }
+    
     players_clean_list = []
 
-    for p in range(len(players_list)):
+    # Process each player from the DataFrame
+    for _, player in players_df.iterrows():
+        
+        id = str(player['id'])
+        name = player['web_name']
+        
+        # Get team short name using team ID
+        team_id = player['team']
+        EPL_team = team_id_to_short.get(team_id, f"Team{team_id}")
+        
+        # Convert element_type to position string
+        element_type = player['element_type']
+        if isinstance(element_type, str):
+            pos = element_type
+        else:
+            pos = position_map.get(element_type, 'UNK')
+            
+        # Skip players with unknown positions
+        if pos == 'UNK' or pos not in ['GKP', 'DEF', 'MID', 'FWD']:
+            continue
+            
+        cost = round(player['now_cost']/10, 1)  # Scale from raw value to millions
+        total_points = player['total_points']
+        pts_per_game = float(player['points_per_game'])
 
-        id = players_list[p][0]
-
-        EPL_team = players_list[p][1]
-        name = id_to_name[int(id)] #############
-        pos = players_list[p][2]
-        cost = float(players_list[p][3])
-        total_points = int(players_list[p][6])
-        pts_per_game = float(players_list[p][8])
-
+        # Apply filters
         if total_points < points_limit or pts_per_game < pts_per_limit:
             continue
         
         if with_status:
-            if players_list[p][4] != 'Available':
+            if player['status'] != 'a':  # Only include available players
                 continue
 
-        players_clean_list.append(Player(id,name,EPL_team,pos,cost,pts_per_game,total_points))
-
+        players_clean_list.append(Player(id, name, EPL_team, pos, cost, pts_per_game, total_points))
 
     if cut_exxy:
 
@@ -179,56 +220,61 @@ def clean_data_oop(file_name, points_limit, pts_per_limit, with_status, cut_exxy
         
     return players_clean_list
 
-def clean_data_oop_best(file_name, points_limit, best_per_pos, with_status, cut_exxy):
+def clean_data_oop_best(file_name=None, points_limit=60, best_per_pos=None, with_status=True, cut_exxy=True):
+    """
+    Updated to use Vaastav's CSV data instead of a local file
+    """
+    # Load Vaastav's CSV data for players and teams
+    players_df = pd.read_csv('https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2024-25/players_raw.csv')
+    teams_df = pd.read_csv('https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2024-25/teams.csv')
     
-    players_list = []
-
-    with open(file_name, 'r') as file:
-        reader = csv.reader(file)
-
-        for row in reader:
-            players_list.append(row)
-
-    players_list.pop(0)
-
-    ######################################
-
-    id_to_name = []
+    # Create a team ID to short name mapping
+    team_id_to_short = dict(zip(teams_df['id'], teams_df['short_name']))
     
-    with open('player_idlist0.csv', 'r',encoding='utf-8') as file:
-        reader = csv.reader(file)
-
-        for row in reader:
-            id_to_name.append(row[1])
-
-    #####################################
-
+    # Position mapping based on element_type
+    position_map = {
+        1: 'GKP',
+        2: 'DEF',
+        3: 'MID',
+        4: 'FWD'
+    }
+    
     best_by_pos = {"GKP":[],"DEF":[],"MID":[],"FWD":[]}
 
-    # teams_wanted = ['AVL','BRE','BUR','FUL','LUT','NFO','TOT','WHU']
+    # Process each player from the DataFrame
+    for _, player in players_df.iterrows():
+        
+        id = str(player['id'])
+        name = player['web_name']
+        
+        # Get team short name using team ID
+        team_id = player['team']
+        EPL_team = team_id_to_short.get(team_id, f"Team{team_id}")
+        
+        # Convert element_type to position string
+        element_type = player['element_type']
+        if isinstance(element_type, str):
+            pos = element_type
+        else:
+            pos = position_map.get(element_type, 'UNK')
+            
+        # Skip players with unknown positions
+        if pos == 'UNK' or pos not in best_by_pos:
+            continue
+            
+        cost = round(player['now_cost']/10, 1)  # Scale from raw value to millions
+        total_points = player['total_points']
+        pts_per_game = float(player['points_per_game'])
 
-    for p in range(len(players_list)):
-
-        id = players_list[p][0]
-        name = id_to_name[int(id)] #############
-        EPL_team = players_list[p][1]
-        pos = players_list[p][2]
-        cost = float(players_list[p][3])
-        total_points = int(players_list[p][6])
-        pts_per_game = float(players_list[p][8])
-
+        # Apply filters
         if total_points < points_limit:
             continue
         
         if with_status:
-            if players_list[p][4] != 'Available':
+            if player['status'] != 'a':  # Only include available players
                 continue
-
-        # if EPL_team not in teams_wanted:
-        #     continue
-
-        best_by_pos[pos].append(Player(id,name,EPL_team,pos,cost,pts_per_game,total_points))
-
+            
+        best_by_pos[pos].append(Player(id, name, EPL_team, pos, cost, pts_per_game, total_points))
 
     players_clean_list = []
     positions = ['GKP','DEF','MID','FWD']
@@ -273,36 +319,58 @@ def clean_data_oop_best(file_name, points_limit, best_per_pos, with_status, cut_
 
 #############################################################################
 
-def clean_data(file_name, points_limit, cut_exxy):
+def clean_data(file_name=None, points_limit=60, cut_exxy=True):
+    """
+    Updated to use Vaastav's CSV data instead of a local file
+    """
+    # Load Vaastav's CSV data for players and teams
+    players_df = pd.read_csv('https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2024-25/players_raw.csv')
+    teams_df = pd.read_csv('https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2024-25/teams.csv')
     
-    players_list = []
-
-    with open(file_name, 'r') as file:
-        reader = csv.reader(file)
-
-        for row in reader:
-            players_list.append(row)
-
-    players_list.pop(0)
-
+    # Create a team ID to short name mapping
+    team_id_to_short = dict(zip(teams_df['id'], teams_df['short_name']))
+    
+    # Position mapping based on element_type
+    position_map = {
+        1: 'GKP',
+        2: 'DEF',
+        3: 'MID',
+        4: 'FWD'
+    }
+    
     players_cleaned_dict = {}
 
-    for p in range(len(players_list)):
+    # Process each player from the DataFrame
+    for _, player in players_df.iterrows():
+        
+        id = str(player['id'])
+        
+        # Get team short name using team ID
+        team_id = player['team']
+        EPL_team = team_id_to_short.get(team_id, f"Team{team_id}")
+        
+        # Convert element_type to position string
+        element_type = player['element_type']
+        if isinstance(element_type, str):
+            pos = element_type
+        else:
+            pos = position_map.get(element_type, 'UNK')
+            
+        # Skip players with unknown positions
+        if pos == 'UNK' or pos not in ['GKP', 'DEF', 'MID', 'FWD']:
+            continue
+            
+        cost = round(player['now_cost']/10, 1)  # Scale from raw value to millions
+        total_points = player['total_points']
 
-        id = players_list[p][0]
-        points = int(players_list[p][6])
-        cost = float(players_list[p][3])
-        pos = players_list[p][2]
-        EPL_team = players_list[p][1]
-        status = players_list[p][4]
-
-        if points < points_limit:
+        # Apply filters
+        if total_points < points_limit:
             continue
 
-        if status != 'Available':
+        if player['status'] != 'a':  # Only include available players
             continue
 
-        players_cleaned_dict[id] = [points, cost, pos, EPL_team]
+        players_cleaned_dict[id] = [total_points, cost, pos, EPL_team]
 
     if cut_exxy:
         pos_req = {'GKP':2,'DEF':5,'MID':5,'FWD':3}
