@@ -29,7 +29,7 @@ def get_pickford_match_data(season="2024-25"):
         players_df = pd.read_csv(players_url)
         
         # Find Pickford's entry (case-insensitive search)
-        pickford_entries = players_df[players_df['web_name'].str.contains('Pickford', case=False)]
+        pickford_entries = players_df[players_df['web_name'].str.contains('Salah', case=False)]
         
         if len(pickford_entries) == 0:
             print("Error: Could not find Pickford in the players data")
