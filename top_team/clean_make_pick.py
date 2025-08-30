@@ -1,4 +1,4 @@
-from player_team import Player
+from top_team.player_team import Player
 import csv
 import random
 import pandas as pd

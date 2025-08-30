@@ -1,5 +1,5 @@
-from player_team import FPLTeam
-from clean_make_pick import clean_api, start_team_pre_picked
+from top_team.player_team import FPLTeam
+from top_team.clean_make_pick import clean_api, start_team_pre_picked
 
 import sys, time, json, requests
 from typing import List, Optional
