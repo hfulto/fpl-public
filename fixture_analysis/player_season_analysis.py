@@ -8,6 +8,12 @@ import requests
 import os
 from datetime import datetime
 
+# Create visualizations directory if it doesn't exist
+VISUALIZATIONS_DIR = "visualizations"
+if not os.path.exists(VISUALIZATIONS_DIR):
+    os.makedirs(VISUALIZATIONS_DIR)
+    print(f"Created directory: {VISUALIZATIONS_DIR}")
+
 def get_player_match_data(player_name="Pickford", season="2024-25"):
     """
     Fetch a player's match-by-match data from Vaastav's repository
@@ -555,8 +561,14 @@ def create_player_visualization(match_df):
     # Save plot as a file
     try:
         filename = f"{player_name.replace(' ', '_').lower()}_season_analysis.png"
-        plt.savefig(filename)
-        print(f"\nVisualization saved as: {filename}")
+        filepath = os.path.join(VISUALIZATIONS_DIR, filename)
+        plt.savefig(filepath)
+        
+        # Verify that the file was actually created
+        if os.path.exists(filepath):
+            print(f"\nVisualization saved as: {filepath}")
+        else:
+            print(f"\nWarning: File wasn't created at {filepath} for unknown reasons")
     except Exception as e:
         print(f"Warning: Could not save visualization - {e}")
     
