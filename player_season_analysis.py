@@ -24,6 +24,11 @@ def get_player_match_data(player_name="Pickford", season="2024-25"):
     # Base URL for Vaastav's data
     base_url = f"https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/{season}"
     
+    # Initialize dictionaries
+    team_name_map = {}
+    team_short_map = {}
+    position_map = {1: "Goalkeeper", 2: "Defender", 3: "Midfielder", 4: "Forward"}
+    
     # 1. Get players_raw.csv to find player's ID
     try:
         players_url = f"{base_url}/players_raw.csv"
@@ -36,15 +41,43 @@ def get_player_match_data(player_name="Pickford", season="2024-25"):
             print(f"Error: Could not find {player_name} in the players data")
             return None
             
+        # 2. Get teams data early for displaying player options
+        try:
+            teams_url = f"{base_url}/teams.csv"
+            teams_df = pd.read_csv(teams_url)
+            # Create mapping dictionaries
+            team_name_map = dict(zip(teams_df['id'], teams_df['name']))
+            team_short_map = dict(zip(teams_df['id'], teams_df['short_name']))
+        except Exception as e:
+            print(f"Error loading teams data: {e}")
+            team_name_map = {}
+            team_short_map = {}
+            
+        # 3. Get position mapping early for displaying player options
+        try:
+            elements_url = f"{base_url}/element_types.csv"
+            elements_df = pd.read_csv(elements_url)
+            position_map = dict(zip(elements_df['id'], elements_df['singular_name']))
+        except Exception as e:
+            # Default position mapping if we can't load from the API
+            print(f"Warning: Could not load position data: {e}")
+            position_map = {1: "Goalkeeper", 2: "Defender", 3: "Midfielder", 4: "Forward"}
+            
+        # Handle multiple player matches
         if len(player_entries) > 1:
             print(f"Found multiple matches for '{player_name}':")
-            for i, player in enumerate(player_entries.iterrows(), 1):
-                p = player[1]
-                print(f"{i}. {p['first_name']} {p['second_name']} ({p['web_name']}) - {p['team_name']} - {p['element_type_name']}")
             
             # Ask the user to select a player
             while True:
                 try:
+                    for i, player in enumerate(player_entries.iterrows(), 1):
+                        p = player[1]
+                        team_id = p['team']
+                        team_name = team_name_map.get(team_id, "Unknown Team")
+                        position_id = p['element_type']
+                        position_name = position_map.get(position_id, "Unknown Position")
+                        print(f"{i}. {p['first_name']} {p['second_name']} ({p['web_name']}) - {team_name} - {position_name}")
+                    
                     choice = int(input("\nEnter the number of the player you want to analyze: "))
                     if 1 <= choice <= len(player_entries):
                         player_row = player_entries.iloc[choice-1]
@@ -63,37 +96,16 @@ def get_player_match_data(player_name="Pickford", season="2024-25"):
         
         print(f"Found {player_full_name} with ID: {player_id}, Team ID: {player_team_id}")
         
-    except Exception as e:
-        print(f"Error loading players data: {e}")
-        return None
-    
-    # 2. Get teams.csv for team names
-    try:
-        teams_url = f"{base_url}/teams.csv"
-        teams_df = pd.read_csv(teams_url)
-        # Create mapping dictionaries
-        team_name_map = dict(zip(teams_df['id'], teams_df['name']))
-        team_short_map = dict(zip(teams_df['id'], teams_df['short_name']))
+        # Get player's team name (we already have team_name_map from earlier)
         player_team = team_name_map.get(player_team_id, "Unknown")
         print(f"{player_full_name} plays for: {player_team}")
-    except Exception as e:
-        print(f"Error loading teams data: {e}")
-        team_name_map = {}
-        team_short_map = {}
-    
-    # 3. Get element_types.csv for position information
-    try:
-        elements_url = f"{base_url}/element_types.csv"
-        elements_df = pd.read_csv(elements_url)
-        position_map = dict(zip(elements_df['id'], elements_df['singular_name']))
+        
+        # Get position name
         player_position_name = position_map.get(player_position, "Unknown")
         print(f"Position: {player_position_name}")
     except Exception as e:
-        print(f"Warning: Could not load position data: {e}")
-        # Default position mapping if we can't load from the API
-        position_map = {1: "Goalkeeper", 2: "Defender", 3: "Midfielder", 4: "Forward"}
-        player_position_name = position_map.get(player_position, "Unknown")
-        print(f"Using default position mapping: {player_position_name}")
+        print(f"Error loading or processing player data: {e}")
+        return None
     
     # 4. Get fixtures.csv for fixture difficulty ratings
     try:
@@ -137,7 +149,26 @@ def get_player_match_data(player_name="Pickford", season="2024-25"):
         print(f"Error loading fixtures data: {e}")
         team_fixtures = pd.DataFrame()
     
-    # 5. Get gameweek data for player's performances
+    # 5. Get player summary data for PPG and other season stats
+    try:
+        # Try to get player summary data if available
+        summary_url = f"{base_url}/players_summary.csv"
+        try:
+            summary_df = pd.read_csv(summary_url)
+            player_summary = summary_df[summary_df['id'] == player_id]
+            
+            if len(player_summary) > 0:
+                ppg = player_summary['points_per_game'].iloc[0]
+                total_points = player_summary['total_points'].iloc[0]
+                print(f"Season stats from summary data - PPG: {ppg}, Total Points: {total_points}")
+            else:
+                print("Player not found in summary data, will calculate PPG from gameweek data")
+        except:
+            print("Could not find players_summary.csv, will calculate PPG from gameweek data")
+    except Exception as e:
+        print(f"Error loading player summary data: {e}")
+    
+    # 6. Get gameweek data for player's performances
     try:
         # Try to get merged gameweeks first
         try:
@@ -195,6 +226,11 @@ def get_player_match_data(player_name="Pickford", season="2024-25"):
         
         for _, gw in player_gws.iterrows():
             gw_num = gw['round']
+            minutes_played = gw['minutes']
+            
+            # Skip matches where player didn't play any minutes
+            if minutes_played == 0:
+                continue
             
             # Find the corresponding fixture
             fixture = team_fixtures[team_fixtures['event'] == gw_num]
@@ -242,6 +278,23 @@ def get_player_match_data(player_name="Pickford", season="2024-25"):
         match_df.attrs['player_team'] = player_team
         match_df.attrs['player_position'] = player_position_name
         match_df.attrs['season'] = season
+        
+        # Try to get PPG from Vaastav's data or calculate it
+        try:
+            # Try to get PPG from summary data first
+            summary_url = f"{base_url}/players_summary.csv"
+            summary_df = pd.read_csv(summary_url)
+            player_summary = summary_df[summary_df['id'] == player_id]
+            
+            if len(player_summary) > 0:
+                match_df.attrs['official_ppg'] = player_summary['points_per_game'].iloc[0]
+                match_df.attrs['total_season_points'] = player_summary['total_points'].iloc[0]
+                match_df.attrs['minutes_played'] = player_summary['minutes'].iloc[0]
+                match_df.attrs['games_started'] = player_summary['starts'].iloc[0] if 'starts' in player_summary.columns else None
+                match_df.attrs['value'] = player_summary['now_cost'].iloc[0] / 10 if 'now_cost' in player_summary.columns else None
+        except:
+            # If summary data not available, we'll calculate PPG in the display function
+            pass
         
         return match_df
         
@@ -331,12 +384,39 @@ def display_player_data(match_df):
     
     # 2. Print summary statistics
     print(f"\n=== {player_name.upper()} SEASON SUMMARY STATISTICS ===")
-    total_points = match_df['points'].sum()
-    avg_points = match_df['points'].mean()
-    total_bonus = match_df['bonus'].sum()
     
-    print(f"Total Points: {total_points}")
-    print(f"Average Points per Game: {avg_points:.2f}")
+    # Calculate total points and PPG from our data (only counting games played)
+    total_points = match_df['points'].sum()
+    games_played = len(match_df)
+    calculated_ppg = total_points / games_played if games_played > 0 else 0
+    
+    # Get official PPG from Vaastav's data if available
+    official_ppg = match_df.attrs.get('official_ppg', None)
+    official_total_points = match_df.attrs.get('total_season_points', None)
+    official_minutes = match_df.attrs.get('minutes_played', None)
+    player_value = match_df.attrs.get('value', None)
+    
+    if official_ppg is not None:
+        print(f"Official Points Per Game: {official_ppg}")
+    
+    print(f"Points Per Game (games with minutes): {calculated_ppg:.2f}")
+    
+    if official_total_points is not None:
+        print(f"Official Total Points: {official_total_points}")
+    
+    print(f"Total Points (games with minutes): {total_points}")
+    
+    if official_minutes is not None:
+        print(f"Official Minutes Played: {official_minutes}")
+    
+    print(f"Minutes Played (analyzed games): {match_df['minutes'].sum()}")
+    print(f"Games Played (with minutes): {games_played}")
+    
+    if player_value is not None:
+        print(f"Current Value: £{player_value}m")
+        print(f"Points Per Million: {calculated_ppg / player_value:.2f}")
+    
+    total_bonus = match_df['bonus'].sum()
     print(f"Bonus Points: {total_bonus}")
     
     # Position-specific statistics
@@ -431,6 +511,7 @@ def create_player_visualization(match_df):
     
     # Configure plot
     plt.title(f"{player_name} {season} Season: Points vs Fixture Difficulty", fontsize=14, fontweight='bold')
+    plt.suptitle("Games with 0 minutes played are excluded", fontsize=10, style='italic')
     plt.xlabel("Gameweek", fontsize=12)
     plt.ylabel("FPL Points", fontsize=12)
     plt.grid(True, alpha=0.3)
